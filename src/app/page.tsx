@@ -1,13 +1,13 @@
-import { fetchOpenAPISpec, parseEndpoints, groupByCategory } from '@/lib/openapi';
+import { fetchOpenAPISpecs, parseEndpointsWithAvailability, groupByCategory } from '@/lib/openapi';
 import DocsPage from '@/components/DocsPage';
 
 export default async function Home() {
   try {
-    const spec = await fetchOpenAPISpec();
-    const endpoints = parseEndpoints(spec);
+    const { preview, stable } = await fetchOpenAPISpecs();
+    const endpoints = parseEndpointsWithAvailability(preview, stable);
     const categories = groupByCategory(endpoints);
 
-    return <DocsPage categories={categories} spec={spec} />;
+    return <DocsPage categories={categories} spec={preview} />;
   } catch (error) {
     return (
       <div className="min-h-screen flex items-center justify-center p-8" style={{ background: 'var(--bg-primary)' }}>

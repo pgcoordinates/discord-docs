@@ -110,11 +110,14 @@ export interface SecurityScheme {
   flows?: Record<string, unknown>;
 }
 
+export type EndpointAvailability = 'both' | 'preview-only' | 'stable-only';
+
 export interface ParsedEndpoint {
   path: string;
   method: string;
   operation: Operation;
   category: string;
+  availability: EndpointAvailability;
 }
 
 export interface Category {

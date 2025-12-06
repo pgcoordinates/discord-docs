@@ -1,36 +1,112 @@
-import { OpenAPISpec, ParsedEndpoint, Category, Schema } from '@/types/openapi';
+import { OpenAPISpec, ParsedEndpoint, Category, Schema, EndpointAvailability } from '@/types/openapi';
 
-const OPENAPI_URL = 'https://raw.githubusercontent.com/discord/discord-api-spec/refs/heads/main/specs/openapi_preview.json';
+const OPENAPI_PREVIEW_URL = 'https://raw.githubusercontent.com/discord/discord-api-spec/refs/heads/main/specs/openapi_preview.json';
+const OPENAPI_STABLE_URL = 'https://raw.githubusercontent.com/discord/discord-api-spec/refs/heads/main/specs/openapi.json';
 
-export async function fetchOpenAPISpec(): Promise<OpenAPISpec> {
-  const response = await fetch(OPENAPI_URL, { next: { revalidate: 3600 } });
-  if (!response.ok) {
-    throw new Error('Failed to fetch OpenAPI spec');
-  }
-  return response.json();
+export interface FetchedSpecs {
+  preview: OpenAPISpec;
+  stable: OpenAPISpec;
 }
 
-export function parseEndpoints(spec: OpenAPISpec): ParsedEndpoint[] {
-  const endpoints: ParsedEndpoint[] = [];
+export async function fetchOpenAPISpecs(): Promise<FetchedSpecs> {
+  const [previewResponse, stableResponse] = await Promise.all([
+    fetch(OPENAPI_PREVIEW_URL, { cache: 'force-cache' }),
+    fetch(OPENAPI_STABLE_URL, { cache: 'force-cache' }),
+  ]);
+
+  if (!previewResponse.ok || !stableResponse.ok) {
+    throw new Error('Failed to fetch OpenAPI specs');
+  }
+
+  const [preview, stable] = await Promise.all([
+    previewResponse.json(),
+    stableResponse.json(),
+  ]);
+
+  return { preview, stable };
+}
+
+// Keep for backwards compatibility
+export async function fetchOpenAPISpec(): Promise<OpenAPISpec> {
+  const { preview } = await fetchOpenAPISpecs();
+  return preview;
+}
+
+function getEndpointKey(path: string, method: string): string {
+  return `${method.toUpperCase()}:${path}`;
+}
+
+function buildEndpointSet(spec: OpenAPISpec): Set<string> {
+  const set = new Set<string>();
+  const methods = ['get', 'post', 'put', 'delete', 'patch', 'options', 'head'] as const;
 
   for (const [path, pathItem] of Object.entries(spec.paths)) {
-    const methods = ['get', 'post', 'put', 'delete', 'patch', 'options', 'head'] as const;
+    for (const method of methods) {
+      if (pathItem[method]) {
+        set.add(getEndpointKey(path, method));
+      }
+    }
+  }
+  return set;
+}
+
+export function parseEndpointsWithAvailability(
+  previewSpec: OpenAPISpec,
+  stableSpec: OpenAPISpec
+): ParsedEndpoint[] {
+  const endpoints: ParsedEndpoint[] = [];
+  const methods = ['get', 'post', 'put', 'delete', 'patch', 'options', 'head'] as const;
+
+  const previewEndpoints = buildEndpointSet(previewSpec);
+  const stableEndpoints = buildEndpointSet(stableSpec);
+
+  // Collect all unique paths from both specs
+  const allPaths = new Set([
+    ...Object.keys(previewSpec.paths),
+    ...Object.keys(stableSpec.paths),
+  ]);
+
+  for (const path of allPaths) {
+    const previewPathItem = previewSpec.paths[path];
+    const stablePathItem = stableSpec.paths[path];
 
     for (const method of methods) {
-      const operation = pathItem[method];
-      if (operation) {
-        const category = getCategoryFromPath(path, operation.tags);
-        endpoints.push({
-          path,
-          method: method.toUpperCase(),
-          operation,
-          category,
-        });
+      const previewOp = previewPathItem?.[method];
+      const stableOp = stablePathItem?.[method];
+      const operation = previewOp || stableOp;
+
+      if (!operation) continue;
+
+      const key = getEndpointKey(path, method);
+      const inPreview = previewEndpoints.has(key);
+      const inStable = stableEndpoints.has(key);
+
+      let availability: EndpointAvailability;
+      if (inPreview && inStable) {
+        availability = 'both';
+      } else if (inPreview) {
+        availability = 'preview-only';
+      } else {
+        availability = 'stable-only';
       }
+
+      const category = getCategoryFromPath(path, operation.tags);
+      endpoints.push({
+        path,
+        method: method.toUpperCase(),
+        operation,
+        category,
+        availability,
+      });
     }
   }
 
   return endpoints;
+}
+
+// Legacy function for backwards compatibility
+export function parseEndpoints(spec: OpenAPISpec): ParsedEndpoint[] {
+  return parseEndpointsWithAvailability(spec, spec);
 }
 
 function getCategoryFromPath(path: string, tags?: string[]): string {

@@ -1,8 +1,14 @@
 'use client';
 
 import { useState, useMemo, useCallback } from 'react';
-import { OpenAPISpec, ParsedEndpoint, Category, Schema } from '@/types/openapi';
+import { OpenAPISpec, ParsedEndpoint, Category, Schema, EndpointAvailability } from '@/types/openapi';
 import { slugify, resolveRef, getSchemaName } from '@/lib/openapi';
+
+const AVAILABILITY_COLORS: Record<EndpointAvailability, { bg: string; text: string; border: string; label: string }> = {
+  'both': { bg: '', text: '', border: '', label: '' },
+  'preview-only': { bg: 'bg-purple-500/10', text: 'text-purple-400', border: 'border-purple-500/20', label: 'Preview' },
+  'stable-only': { bg: 'bg-cyan-500/10', text: 'text-cyan-400', border: 'border-cyan-500/20', label: 'Stable Only' },
+};
 
 interface DocsPageProps {
   categories: Category[];
@@ -21,6 +27,7 @@ export default function DocsPage({ categories, spec }: DocsPageProps) {
   const [search, setSearch] = useState('');
   const [selectedMethods, setSelectedMethods] = useState<Set<string>>(new Set());
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [selectedAvailability, setSelectedAvailability] = useState<EndpointAvailability | null>(null);
   const [expandedEndpoint, setExpandedEndpoint] = useState<string | null>(null);
 
   const allMethods = useMemo(() => {
@@ -40,11 +47,18 @@ export default function DocsPage({ categories, spec }: DocsPageProps) {
             ep.operation.summary?.toLowerCase().includes(search.toLowerCase()) ||
             ep.operation.operationId?.toLowerCase().includes(search.toLowerCase());
           const matchesMethod = selectedMethods.size === 0 || selectedMethods.has(ep.method);
-          return matchesSearch && matchesMethod;
+          const matchesAvailability = !selectedAvailability || ep.availability === selectedAvailability;
+          return matchesSearch && matchesMethod && matchesAvailability;
         })
       }))
       .filter(cat => cat.endpoints.length > 0);
-  }, [categories, search, selectedMethods, selectedCategory]);
+  }, [categories, search, selectedMethods, selectedCategory, selectedAvailability]);
+
+  const availabilityCounts = useMemo(() => {
+    const counts = { 'preview-only': 0, 'stable-only': 0, 'both': 0 };
+    categories.forEach(cat => cat.endpoints.forEach(ep => counts[ep.availability]++));
+    return counts;
+  }, [categories]);
 
   const totalEndpoints = useMemo(() =>
     filteredCategories.reduce((sum, cat) => sum + cat.endpoints.length, 0),
@@ -63,9 +77,10 @@ export default function DocsPage({ categories, spec }: DocsPageProps) {
     setSearch('');
     setSelectedMethods(new Set());
     setSelectedCategory(null);
+    setSelectedAvailability(null);
   }, []);
 
-  const hasFilters = search || selectedMethods.size > 0 || selectedCategory;
+  const hasFilters = search || selectedMethods.size > 0 || selectedCategory || selectedAvailability;
 
   return (
     <div className="min-h-screen" style={{ background: 'var(--bg-primary)' }}>
@@ -157,6 +172,26 @@ export default function DocsPage({ categories, spec }: DocsPageProps) {
                 <option key={cat.name} value={cat.name}>{cat.name} ({cat.endpoints.length})</option>
               ))}
             </select>
+          </div>
+
+          <div className="w-px h-6" style={{ background: 'var(--border-primary)' }} />
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Status</span>
+            <div className="flex gap-1">
+              <button
+                onClick={() => setSelectedAvailability(selectedAvailability === 'preview-only' ? null : 'preview-only')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md border transition-all ${selectedAvailability === 'preview-only' ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' : ''}`}
+                style={selectedAvailability !== 'preview-only' ? { background: 'var(--bg-tertiary)', borderColor: 'var(--border-primary)', color: 'var(--text-muted)' } : {}}>
+                Preview ({availabilityCounts['preview-only']})
+              </button>
+              <button
+                onClick={() => setSelectedAvailability(selectedAvailability === 'stable-only' ? null : 'stable-only')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md border transition-all ${selectedAvailability === 'stable-only' ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' : ''}`}
+                style={selectedAvailability !== 'stable-only' ? { background: 'var(--bg-tertiary)', borderColor: 'var(--border-primary)', color: 'var(--text-muted)' } : {}}>
+                Stable Only ({availabilityCounts['stable-only']})
+              </button>
+            </div>
           </div>
 
           {hasFilters && (
@@ -356,10 +391,17 @@ function EndpointCard({ endpoint, spec, isExpanded, onToggle }: EndpointCardProp
     return content?.schema;
   };
 
+  const availabilityStyle = AVAILABILITY_COLORS[endpoint.availability];
+
   return (
     <div className="rounded-lg border overflow-hidden" style={{ background: 'var(--bg-secondary)', borderColor: isExpanded ? 'var(--border-secondary)' : 'var(--border-primary)' }}>
       <button onClick={onToggle} className="w-full px-4 py-3 flex items-center gap-4 text-left hover:bg-white/[0.02] transition-colors">
         <span className={`px-2.5 py-1 text-xs font-mono font-semibold rounded border ${colors.bg} ${colors.text} ${colors.border}`}>{method}</span>
+        {endpoint.availability !== 'both' && (
+          <span className={`px-2 py-0.5 text-[10px] font-medium rounded border ${availabilityStyle.bg} ${availabilityStyle.text} ${availabilityStyle.border}`}>
+            {availabilityStyle.label}
+          </span>
+        )}
         <code className="text-sm font-mono flex-1" style={{ color: 'var(--text-secondary)' }}>{formatPath(path)}</code>
         {operation.summary && <span className="text-sm hidden lg:block truncate max-w-sm" style={{ color: 'var(--text-muted)' }}>{operation.summary}</span>}
         <svg className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} style={{ color: 'var(--text-muted)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
