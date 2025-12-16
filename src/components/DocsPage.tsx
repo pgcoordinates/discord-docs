@@ -1045,7 +1045,7 @@ function JsonHighlight({ data }: { data: unknown }) {
               {i < obj.length - 1 ? ',\n' : '\n'}
             </span>
           ))}
-          {'  '.repeat(indent)}]
+          {'  '.repeat(indent)}{']'}
         </>
       );
     }
@@ -1063,7 +1063,7 @@ function JsonHighlight({ data }: { data: unknown }) {
               {i < entries.length - 1 ? ',\n' : '\n'}
             </span>
           ))}
-          {'  '.repeat(indent)}}
+          {'  '.repeat(indent)}{'}'}
         </>
       );
     }
